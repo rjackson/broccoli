@@ -1,6 +1,12 @@
 var test = require('tap').test
 var broccoli = require('..')
 var Builder = broccoli.Builder
+var RSVP = require('rsvp')
+var Promise = RSVP.Promise
+
+RSVP.on('error', function(error) {
+  throw error
+})
 
 function countingTree (readFn) {
   return {
@@ -14,25 +20,26 @@ function countingTree (readFn) {
   }
 }
 
+
 test('Builder', function (t) {
   test('core functionality', function (t) {
     t.end()
 
     test('build', function (t) {
-      test('returns string tree', function (t) {
+      test('passes through string tree', function (t) {
         var builder = new Builder('someDir')
-        builder.build().then(function (dir) {
-          t.equal(dir, 'someDir')
+        builder.build().then(function (blah) {
+          t.equal(blah.directory, 'someDir')
           t.end()
         })
       })
 
-      test('returns dir returned by object tree', function (t) {
+      test('calls read on the provided tree object', function (t) {
         var builder = new Builder({
           read: function (readTree) { return 'someDir' }
         })
-        builder.build().then(function (dir) {
-          t.equal(dir, 'someDir')
+        builder.build().then(function (blah) {
+          t.equal(blah.directory, 'someDir')
           t.end()
         })
       })
@@ -44,15 +51,15 @@ test('Builder', function (t) {
       var subtree = new countingTree(function (readTree) { return 'foo' })
       var builder = new Builder({
         read: function (readTree) {
-          return readTree(subtree).then(function (dir) {
+          return readTree(subtree).then(function (blah) {
             var dirPromise = readTree(subtree) // read subtree again
             t.ok(dirPromise.then, 'is promise, not string')
             return dirPromise
           })
         }
       })
-      builder.build().then(function (dir) {
-        t.equal(dir, 'foo')
+      builder.build().then(function (blah) {
+        t.equal(blah.directory, 'foo')
         t.equal(subtree.readCount, 1)
         t.end()
       })
@@ -68,8 +75,8 @@ test('Builder', function (t) {
         var subtree1 = countingTree(function (readTree) { return 'foo' })
         var subtree2 = countingTree(function (readTree) { throw new Error('bar') })
         var builder = new Builder(tree)
-        builder.build().then(function (dir) {
-          t.equal(dir, 'foo')
+        builder.build().then(function (blah) {
+          t.equal(blah.directory, 'foo')
           builder.build().catch(function (err) {
             t.equal(err.message, 'bar')
             builder.cleanup()
@@ -81,6 +88,31 @@ test('Builder', function (t) {
         })
       })
 
+      t.end()
+    })
+  })
+
+  test('Tree Graph', function (t) {
+    var parent = countingTree(function (readTree) {
+      return readTree(child).then(function (dir) {
+        return new Promise(function (resolve, reject) {
+          setTimeout(function() { resolve('parentTreeDir') }, 50)
+        })
+      })
+    })
+
+    var child = countingTree(function (readTree) {
+      return readTree('srcDir').then(function (dir) {
+        return new Promise(function (resolve, reject) {
+          setTimeout(function() { resolve('childTreeDir') }, 80)
+        })
+      })
+    })
+
+    var builder = new Builder(parent)
+    builder.build().then(function (blah) {
+      t.equal(blah.directory, 'parentTreeDir')
+      console.error(blah.graph)
       t.end()
     })
   })
